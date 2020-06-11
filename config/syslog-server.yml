@@ -1,0 +1,197 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: syslog-server
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app: syslog-server
+  ports:
+  - name: syslog
+    protocol: TCP
+    port: 5014
+    nodePort: 31514
+  - name: http
+    protocol: TCP
+    port: 8080
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: syslog-server
+  labels:
+    app: syslog-server
+spec:
+  selector:
+    matchLabels:
+      app: syslog-server
+  template:
+    metadata:
+      labels:
+        app: syslog-server
+    spec:
+      initContainers:
+      - name: run
+        image: gcr.io/paketo-buildpacks/run:full-cnb-cf
+        volumeMounts:
+        - name: consul-config
+          mountPath: /opt/bitnami/consul/conf
+        env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: USE_EXTERNAL_IP
+          value: "true"
+        command:
+        - bash
+        - -cex
+        - |
+          if [ "${USE_EXTERNAL_IP}" == "true" ];then
+            # TODO how to get node's external ip ?
+            NODE_IP=$(curl https://ipinfo.io/ip)
+          fi
+          cat <<EOF | jq . > /opt/bitnami/consul/conf/config.json
+          {
+            "enable_local_script_checks": true
+          }
+          EOF
+          cat <<EOF | jq . > /opt/bitnami/consul/conf/syslog.json
+          {
+            "service": {
+              "name": "syslog",
+              "tags": [
+                "syslog"
+              ],
+              "address": "${NODE_IP}",
+              "port": 31514,
+              "check": {
+                "args": [
+                  "perl",
+                  "-mIO::Socket::INET",
+                  "-le",
+                  "'exit(IO::Socket::INET->new(PeerAddr=>shift,PeerPort=>shift,Proto=>shift,Timeout=>5)?0:1)'",
+                  "localhost",
+                  "5014"
+                ],
+                "interval": "3s"
+              }
+            }
+          }
+          EOF
+      containers:
+      - name: consul
+        image: docker.io/bitnami/consul:1.7.3-debian-10-r1
+        env:
+        - name: BITNAMI_DEBUG
+          value: "false"
+        - name: CONSUL_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: CONSUL_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: CONSUL_BOOTSTRAP_EXPECT
+          value: "0"
+        - name: CONSUL_AGENT_MODE
+          value: client
+        - name: CONSUL_RETRY_JOIN
+          value: consul-server-0.consul-server.demo.svc.cluster.local
+        - name: CONSUL_DISABLE_KEYRING_FILE
+          value: "true"
+        - name: CONSUL_RAFT_MULTIPLIER
+          value: "1"
+        - name: CONSUL_DOMAIN
+          value: consul
+        - name: CONSUL_DATACENTER
+          value: dc1
+        volumeMounts:
+        - mountPath: /opt/bitnami/consul/conf/config.json
+          name: consul-config
+          subPath: config.json
+        - mountPath: /opt/bitnami/consul/conf/syslog.json
+          name: consul-config
+          subPath: syslog.json
+      - name: syslog-server
+        image: making/null-syslog-server:0.0.1-SNAPSHOT
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: kubernetes
+        - name: LOGGING_LEVEL_LOL_MAKI_LAB
+          value: DEBUG
+        - name: SYSLOG_SERVER_PORT
+          value: "5014"
+        - name: INFO_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: INFO_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: INFO_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: INFO_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: JAVA_OPTS
+          value: "-XX:ReservedCodeCacheSize=32M -Xss512k"
+        - name: BPL_JVM_THREAD_COUNT
+          value: "20"
+        - name: BPL_JVM_HEAD_ROOM
+          value: "5"
+        - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+          value: info,health,env,prometheus
+        - name: MANAGEMENT_METRICS_EXPORT_PROMETHEUS_RSOCKET_HOST
+          value: prometheus-proxy.dev.bosh.tokyo # <-- CHANGE ME
+        - name: MANAGEMENT_METRICS_TAGS_ORGANIZATION
+          value: gke
+        - name: MANAGEMENT_METRICS_TAGS_SPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: MANAGEMENT_METRICS_TAGS_APPLICATION
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['app']
+        - name: MANAGEMENT_METRICS_TAGS_INSTANCE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          limits:
+            memory: "256Mi"
+          requests:
+            memory: "256Mi"
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 10
+          timeoutSeconds: 1
+          periodSeconds: 10
+          failureThreshold: 1
+        ports:
+        - name: syslog
+          containerPort: 5014
+        - name: http
+          containerPort: 8080
+      volumes:
+      - name: consul-config
+        emptyDir: {}

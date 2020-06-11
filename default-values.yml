@@ -1,0 +1,10 @@
+replicas: 1
+persistence:
+  enabled: false
+configmap: |
+  {
+    "client_addr": "0.0.0.0",
+    "recursors": [
+      "8.8.8.8"
+    ]
+  }

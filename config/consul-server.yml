@@ -1,212 +1,213 @@
 ---
-# Source: consul/templates/consul-configmap.yaml
 apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: consul-server-configuration
-  labels:
-    app: consul
-    chart: consul-7.0.15
-    release: consul-server
-    heritage: Helm
 data:
-  config.json:
-    |-
-      {
-        "client_addr": "0.0.0.0",
-        "recursors": [
-          "8.8.8.8"
-        ]
-      }
+  config.json: |-
+    {
+      "client_addr": "0.0.0.0",
+      "recursors": [
+        "8.8.8.8"
+      ]
+    }
   connection.json: |
     {
       "retry_join": ["consul-server-0.consul-server.demo.svc"]
     }
----
-# Source: consul/templates/consul-service.yaml
-apiVersion: v1
-kind: Service
+kind: ConfigMap
 metadata:
-  name: consul-server
   labels:
     app: consul
     chart: consul-7.0.15
-    release: consul-server
     heritage: Helm
+    release: consul-server
+  name: consul-server-configuration
+---
+apiVersion: v1
+kind: Service
+metadata:
   annotations:
     service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
-spec:
-  ports:
-    - name: http
-      protocol: "TCP"
-      port: 8500
-    - name: rpc
-      port: 8400
-    - name: serflan-tcp
-      protocol: "TCP"
-      port: 8301
-    - name: serflan-udp
-      protocol: "UDP"
-      port: 8301
-    - name: server
-      port: 8300
-    - name: consuldns-tcp
-      port: 8600
-    - name: consuldns-udp
-      protocol: "UDP"
-      port: 8600
-  clusterIP: None
-  selector:
-    app: consul
-    release: consul-server
----
-# Source: consul/templates/ui-service.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: consul-server-ui
   labels:
     app: consul
     chart: consul-7.0.15
-    release: consul-server
     heritage: Helm
-  annotations:
-    {}
+    release: consul-server
+  name: consul-server
 spec:
-  type: ClusterIP
+  clusterIP: None
   ports:
-    - name: http
-      port: 80
-      targetPort: http
+  - name: http
+    port: 8500
+    protocol: TCP
+  - name: rpc
+    port: 8400
+  - name: serflan-tcp
+    port: 8301
+    protocol: TCP
+  - name: serflan-udp
+    port: 8301
+    protocol: UDP
+  - name: server
+    port: 8300
+  - name: consuldns-tcp
+    port: 8600
+  - name: consuldns-udp
+    port: 8600
+    protocol: UDP
   selector:
     app: consul
     release: consul-server
 ---
-# Source: consul/templates/statefulset.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  annotations: {}
+  labels:
+    app: consul
+    chart: consul-7.0.15
+    heritage: Helm
+    release: consul-server
+  name: consul-server-ui
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+  selector:
+    app: consul
+    release: consul-server
+  type: ClusterIP
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: consul-server
+  annotations:
+    kbld.k14s.io/images: |
+      - Metas:
+        - Tag: 1.7.3-debian-10-r1
+          Type: resolved
+          URL: docker.io/bitnami/consul:1.7.3-debian-10-r1
+        URL: index.docker.io/bitnami/consul@sha256:f9a2ef2063dc5e0d6f3549077053888d1547577767a8fd173ffdd2857e771ef7
   labels:
     app: consul
     chart: consul-7.0.15
-    release: consul-server
     heritage: Helm
+    release: consul-server
+  name: consul-server
 spec:
+  podManagementPolicy: Parallel
+  replicas: 1
   selector:
     matchLabels:
       app: consul
       release: consul-server
   serviceName: consul-server
-  replicas: 1
-  podManagementPolicy: Parallel
-  updateStrategy:
-    type: RollingUpdate
   template:
     metadata:
       labels:
         app: consul
         chart: consul-7.0.15
-        release: consul-server
         heritage: Helm
-    spec:      
+        release: consul-server
+    spec:
+      containers:
+      - env:
+        - name: BITNAMI_DEBUG
+          value: "false"
+        - name: CONSUL_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: CONSUL_RETRY_JOIN
+          value: consul-server-0.consul-server.demo.svc.cluster.local
+        - name: CONSUL_DISABLE_KEYRING_FILE
+          value: "true"
+        - name: CONSUL_BOOTSTRAP_EXPECT
+          value: "1"
+        - name: CONSUL_BOOTSTRAP_EXPECT
+          value: "1"
+        - name: CONSUL_RAFT_MULTIPLIER
+          value: "1"
+        - name: CONSUL_DOMAIN
+          value: consul
+        - name: CONSUL_DATACENTER
+          value: dc1
+        - name: CONSUL_UI
+          value: "true"
+        - name: CONSUL_HTTP_PORT_NUMBER
+          value: "8500"
+        - name: CONSUL_DNS_PORT_NUMBER
+          value: "8600"
+        - name: CONSUL_RPC_PORT_NUMBER
+          value: "8300"
+        - name: CONSUL_SERF_LAN_PORT_NUMBER
+          value: "8301"
+        image: index.docker.io/bitnami/consul@sha256:f9a2ef2063dc5e0d6f3549077053888d1547577767a8fd173ffdd2857e771ef7
+        imagePullPolicy: IfNotPresent
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - consul
+              - leave
+        livenessProbe:
+          exec:
+            command:
+            - consul
+            - operator
+            - raft
+            - list-peers
+          failureThreshold: 6
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: consul
+        ports:
+        - containerPort: 8500
+          name: http
+        - containerPort: 8400
+          name: rpc
+        - containerPort: 8301
+          name: serflan-tcp
+          protocol: TCP
+        - containerPort: 8301
+          name: serflan-udp
+          protocol: UDP
+        - containerPort: 8300
+          name: server
+        - containerPort: 8600
+          name: consuldns-tcp
+        - containerPort: 8600
+          name: consuldns-udp
+          protocol: UDP
+        readinessProbe:
+          exec:
+            command:
+            - consul
+            - members
+          failureThreshold: 6
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        resources:
+          limits: {}
+          requests: {}
+        volumeMounts:
+        - mountPath: /opt/bitnami/consul/conf/config.json
+          name: consul-config
+          subPath: config.json
+        - mountPath: /opt/bitnami/consul/conf/connection.json
+          name: consul-config
+          subPath: connection.json
       securityContext:
         fsGroup: 1001
         runAsUser: 1001
-      containers:
-        - name: consul
-          image: docker.io/bitnami/consul:1.7.3-debian-10-r1
-          imagePullPolicy: "IfNotPresent"
-          ports:
-            - name: http
-              containerPort: 8500
-            - name: rpc
-              containerPort: 8400
-            - name: serflan-tcp
-              protocol: "TCP"
-              containerPort: 8301
-            - name: serflan-udp
-              protocol: "UDP"
-              containerPort: 8301
-            - name: server
-              containerPort: 8300
-            - name: consuldns-tcp
-              containerPort: 8600
-            - name: consuldns-udp
-              protocol: "UDP"
-              containerPort: 8600
-          resources:
-            limits: {}
-            requests: {}
-          env:
-            - name: BITNAMI_DEBUG
-              value: "false"
-            - name: CONSUL_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: CONSUL_RETRY_JOIN
-              value: "consul-server-0.consul-server.demo.svc.cluster.local"
-            - name: CONSUL_DISABLE_KEYRING_FILE
-              value: "true"
-            - name: CONSUL_BOOTSTRAP_EXPECT
-              value: "1"
-            - name: CONSUL_BOOTSTRAP_EXPECT
-              value: "1"
-            - name: CONSUL_RAFT_MULTIPLIER
-              value: "1"
-            - name: CONSUL_DOMAIN
-              value: "consul"
-            - name: CONSUL_DATACENTER
-              value: "dc1"
-            - name: CONSUL_UI
-              value: "true"
-            - name: CONSUL_HTTP_PORT_NUMBER
-              value: "8500"
-            - name: CONSUL_DNS_PORT_NUMBER
-              value: "8600"
-            - name: CONSUL_RPC_PORT_NUMBER
-              value: "8300"
-            - name: CONSUL_SERF_LAN_PORT_NUMBER
-              value: "8301"
-          livenessProbe:
-            exec:
-              command:
-                - consul
-                - operator
-                - raft
-                - list-peers
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            successThreshold: 1
-            failureThreshold: 6
-          readinessProbe:
-            exec:
-              command:
-                - consul
-                - members
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 5
-            successThreshold: 1
-            failureThreshold: 6
-          lifecycle:
-            preStop:
-              exec:
-                command:
-                  - consul
-                  - leave
-          volumeMounts:
-            - name: consul-config
-              mountPath: /opt/bitnami/consul/conf/config.json
-              subPath: config.json
-            - name: consul-config
-              mountPath: /opt/bitnami/consul/conf/connection.json
-              subPath: connection.json
       volumes:
-        - name: consul-config
-          configMap:
-            name: consul-server-configuration
-        - name: data
-          emptyDir: {}
+      - configMap:
+          name: consul-server-configuration
+        name: consul-config
+      - emptyDir: {}
+        name: data
+  updateStrategy:
+    type: RollingUpdate

@@ -121,7 +121,7 @@ spec:
         - name: SPRING_PROFILES_ACTIVE
           value: kubernetes
         - name: LOGGING_LEVEL_LOL_MAKI_LAB
-          value: DEBUG
+          value: INFO
         - name: SYSLOG_SERVER_PORT
           value: "5014"
         - name: INFO_NODE_IP
